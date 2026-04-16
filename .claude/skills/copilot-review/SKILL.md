@@ -62,7 +62,25 @@ gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
   --jq '[.[] | select(.created_at > "REQUEST_TIME") | {id, path, line, body}]'
 ```
 
-**If 0 new inline comments → the cycle is complete.** Report a summary (total rounds, total fixes applied) and stop.
+**If 0 new inline comments — do not stop yet.** Inline comments can take a few seconds to propagate after the review object appears. Cross-check by fetching all unresolved threads and filtering to any whose first comment ID was not in a previous cycle's resolved set:
+
+```bash
+gh api graphql -f query='{
+  repository(owner: "OWNER", name: "REPO") {
+    pullRequest(number: PR_NUMBER) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) { nodes { databaseId body } }
+        }
+      }
+    }
+  }
+}' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | {id, commentId: .comments.nodes[0].databaseId, body: .comments.nodes[0].body}]'
+```
+
+If this returns unresolved threads that were not seen in previous cycles, treat them as new comments and continue to Step 5. **Only stop when both checks return empty** — no new timestamped comments AND no unresolved threads from this cycle.
 
 ## Step 5 — Evaluate each comment (be opinionated)
 
